@@ -319,7 +319,8 @@ private void ComboIcon_SelectedIndexChanged(object? sender, EventArgs e)
             File.WriteAllText(Path.Combine(emboldDir, "config.json"), configJson);
 
             // Write registry - direct to C# app instead of scripts
-            string appPath = System.Reflection.Assembly.GetExecutingAssembly().Location;
+            // Use MainModule.FileName for single-file publish compatibility
+            string appPath = System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName;
             string regCommand = $"\"{appPath}\" \"%1\"";
             string iconPath = Path.Combine(emboldDir, "terminal.ico");
 
