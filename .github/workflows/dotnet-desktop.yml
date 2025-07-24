@@ -2,9 +2,8 @@ name: .NET WinForms Publish
 
 on:
   push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
+    tags:
+      - 'v*'
 
 jobs:
   build:
@@ -36,3 +35,19 @@ jobs:
       with:
         name: embold-ssh-win-x64
         path: embold-ssh-win-x64.zip
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ github.ref_name }}
+        name: "emBold SSH Handler ${{ github.ref_name }}"
+        body: |
+          Windows SSH protocol handler for easy ssh:// link integration.
+          - User-friendly terminal and icon selection
+          - Clean install/uninstall (removes registry entries)
+          - No PowerShell/VBS scripts; all logic in C#
+          - Defender-friendly, self-contained .NET 8 WinForms app
+          - See README for usage and installation instructions
+        files: embold-ssh-win-x64.zip
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
