@@ -9,12 +9,17 @@ obj/
 # VS Code settings
 .vscode/
 
+# Visual Studio settings
+.vs/
+
 # Publish output
 publish/
+dist/
 
 # NuGet packages
 *.nupkg
 packages/
+.nuget/
 
 # Windows files
 Thumbs.db
@@ -36,3 +41,14 @@ TestResults/
 # Exclude secrets/configs (if any)
 secrets.json
 *.env
+
+# MSBuild binary log
+*.binlog
+
+# Temporary files
+*.tmp
+*.temp
+*~
+
+# JetBrains Rider
+.idea/
