@@ -1,457 +1,361 @@
+using Microsoft.Win32;
 using System;
 using System.Diagnostics;
+using System.Drawing;
 using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Reflection;
+using System.Security.Principal;
 using System.Text.Json;
+using System.Threading.Tasks;
 using System.Windows.Forms;
-using Microsoft.Win32;
 
 namespace SSHHandlerApp
 {
-
     public partial class Form1 : Form
     {
-        // UI controls
-    private ComboBox comboTerminal = null!;
-    private ComboBox comboIcon = null!;
-    private Button btnInstall = null!;
-    private Button btnUninstall = null!;
-    private PictureBox pictureIcon = null!;
+        // These controls are initialized in Form1.Designer.cs
+        private ComboBox comboTerminal = null!;
+        private ComboBox comboIcon = null!;
+        private Button btnInstall = null!;
+        private Button btnUninstall = null!;
+        private PictureBox pictureIcon = null!;
+        private LinkLabel linkUpdate = null!;
 
-        public Form1()
+        private readonly string _installDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "embold-ssh");
+        private readonly string _installedAppPath;
+
+        public Form1(string[] args)
         {
-            // Check if launched with SSH URL argument
-            string[] args = Environment.GetCommandLineArgs();
-            if (args.Length > 1 && args[1].StartsWith("ssh://"))
+            _installedAppPath = Path.Combine(_installDir, "SSHHandlerApp.exe");
+
+            InitializeComponent();
+
+            // Set up event handlers
+            btnInstall.Click += BtnInstall_Click;
+            btnUninstall.Click += BtnUninstall_Click;
+            comboTerminal.SelectedIndexChanged += ComboTerminal_SelectedIndexChanged;
+            comboIcon.SelectedIndexChanged += ComboIcon_SelectedIndexChanged;
+            comboIcon.DrawItem += ComboIcon_DrawItem;
+
+            // Initialize Icons and UI state
+            ExtractDefaultIcons();
+            string iconsDir = Path.Combine(_installDir, "icons");
+            if (Directory.Exists(iconsDir))
             {
-                HandleSSHUrl(args[1]);
-                return; // Exit after handling URL
-            }
-
-            InitializeComponent();        // Populate terminal options
-        comboTerminal = new ComboBox();
-        comboTerminal.Location = new System.Drawing.Point(150, 20);
-        // Add version label at the bottom right
-        var versionLabel = new Label();
-        versionLabel.Text = $"Version: {Application.ProductVersion}";
-        versionLabel.AutoSize = true;
-        versionLabel.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
-        versionLabel.Location = new System.Drawing.Point(this.ClientSize.Width - 160, this.ClientSize.Height - 30);
-        versionLabel.TextAlign = System.Drawing.ContentAlignment.BottomRight;
-        versionLabel.Font = new System.Drawing.Font("Segoe UI", 8F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point);
-        this.Controls.Add(versionLabel);
-        // Ensure label stays at the bottom right on resize
-        this.Resize += (s, e) => {
-            versionLabel.Location = new System.Drawing.Point(this.ClientSize.Width - versionLabel.Width - 10, this.ClientSize.Height - versionLabel.Height - 10);
-        };
-        // Set initial position
-        versionLabel.Location = new System.Drawing.Point(this.ClientSize.Width - versionLabel.Width - 10, this.ClientSize.Height - versionLabel.Height - 10);
-        comboTerminal.Size = new System.Drawing.Size(250, 23);
-        comboTerminal.DropDownStyle = ComboBoxStyle.DropDownList;
-        comboTerminal.Items.Add("Windows Terminal");
-        comboTerminal.Items.Add("Command Prompt");
-        comboTerminal.Items.Add("Ubuntu");
-        comboTerminal.Items.Add("Custom...");
-        comboTerminal.SelectedIndexChanged += ComboTerminal_SelectedIndexChanged;
-        this.Controls.Add(comboTerminal);
-
-        // Populate icon options
-        comboIcon = new ComboBox();
-        comboIcon.Location = new System.Drawing.Point(150, 60);
-        // Ensure default icons are available in the user's icons directory
-        ExtractDefaultIcons();
-        comboIcon.Size = new System.Drawing.Size(180, 23); // Reduced width for icon names
-        comboIcon.DropDownStyle = ComboBoxStyle.DropDownList;
-        string iconsDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "embold-ssh", "icons");
-        if (Directory.Exists(iconsDir))
-        {
-            foreach (var iconFile in Directory.GetFiles(iconsDir, "*.ico"))
-            {
-                comboIcon.Items.Add(new ComboBoxItem { Display = Path.GetFileName(iconFile), Value = iconFile });
-            }
-        }
-        comboIcon.Items.Add(new ComboBoxItem { Display = "Custom...", Value = "Custom..." });
-        comboIcon.SelectedIndexChanged += ComboIcon_SelectedIndexChanged;
-        comboIcon.DrawMode = DrawMode.OwnerDrawFixed;
-        comboIcon.DrawItem += ComboIcon_DrawItem;
-        this.Controls.Add(comboIcon);
-
-        // Picture box for icon preview
-        pictureIcon = new PictureBox();
-        pictureIcon.Location = new System.Drawing.Point(410, 60);
-        pictureIcon.Size = new System.Drawing.Size(32, 32);
-        pictureIcon.SizeMode = PictureBoxSizeMode.Zoom;
-        this.Controls.Add(pictureIcon);
-
-        // Set defaults
-        if (comboTerminal.Items.Contains("Windows Terminal"))
-            comboTerminal.SelectedItem = "Windows Terminal";
-
-        // Set initial icon to match preselected terminal
-        string? initialMatchIcon = null;
-        if (comboTerminal.SelectedItem?.ToString() == "Windows Terminal")
-            initialMatchIcon = "wt.ico";
-        else if (comboTerminal.SelectedItem?.ToString() == "Command Prompt")
-            initialMatchIcon = "cmd.ico";
-        else if (comboTerminal.SelectedItem?.ToString() == "Ubuntu")
-            initialMatchIcon = "ubuntu.ico";
-
-        bool foundInitial = false;
-        if (!string.IsNullOrEmpty(initialMatchIcon))
-        {
-            for (int i = 0; i < comboIcon.Items.Count; i++)
-            {
-                if (comboIcon.Items[i] is ComboBoxItem cbi && cbi.Display.Equals(initialMatchIcon, StringComparison.OrdinalIgnoreCase))
+                foreach (var iconFile in Directory.GetFiles(iconsDir, "*.ico"))
                 {
-                    comboIcon.SelectedIndex = i;
-                    foundInitial = true;
-                    break;
+                    comboIcon.Items.Add(new ComboBoxItem { Display = Path.GetFileName(iconFile), Value = iconFile });
                 }
             }
-        }
-        if (!foundInitial && comboIcon.Items.Count > 0)
-            comboIcon.SelectedIndex = 0;
+            comboIcon.Items.Add(new ComboBoxItem { Display = "Custom...", Value = "Custom..." });
 
-        // Show default icon
-        if (comboIcon.Items.Count > 0)
-            ComboIcon_SelectedIndexChanged(this, EventArgs.Empty);
-    }
+            // Set initial icon based on the default terminal
+            ComboTerminal_SelectedIndexChanged(this, EventArgs.Empty);
 
-    // Helper class for ComboBox items
-    private class ComboBoxItem
-    {
-        public string Display { get; set; } = string.Empty;
-        public string Value { get; set; } = string.Empty;
-        public override string ToString() => Display;
-    }
+            LoadConfig();
+            CheckForUpdate();
 
-    // Custom draw to show only filename
-    private void ComboIcon_DrawItem(object? sender, DrawItemEventArgs e)
-    {
-        if (e.Index < 0) return;
-        var cb = sender as ComboBox;
-        var item = cb?.Items[e.Index] as ComboBoxItem;
-        string text = item?.Display ?? cb?.Items[e.Index]?.ToString() ?? string.Empty;
-        e.DrawBackground();
-        using (var brush = new System.Drawing.SolidBrush(e.ForeColor))
-        {
-            e.Graphics.DrawString(text, e.Font ?? SystemFonts.DefaultFont, brush, e.Bounds);
-        }
-        e.DrawFocusRectangle();
-    }
-
-    private void ComboTerminal_SelectedIndexChanged(object? sender, EventArgs e)
-    {
-        if (comboTerminal.SelectedItem?.ToString() == "Custom...")
-        {
-            using (OpenFileDialog ofd = new OpenFileDialog())
+            // Handle command-line arguments for post-elevation tasks
+            if (args.Length > 0)
             {
-                ofd.Filter = "Executables (*.exe)|*.exe|All files (*.*)|*.*";
-                if (ofd.ShowDialog() == DialogResult.OK)
+                if (args.Any(a => a.Equals("--install", StringComparison.OrdinalIgnoreCase)))
                 {
-                    if (!comboTerminal.Items.Contains(ofd.FileName))
-                        comboTerminal.Items.Insert(comboTerminal.Items.Count - 1, ofd.FileName);
-                    comboTerminal.SelectedItem = ofd.FileName;
+                    PerformInstall();
+                    Application.Exit();
                 }
-                else
+                else if (args.Any(a => a.Equals("--uninstall", StringComparison.OrdinalIgnoreCase)))
                 {
-                    // Revert to previous selection if cancelled
-                    comboTerminal.SelectedIndex = 0;
+                    PerformUninstall();
                 }
             }
         }
 
-        // Auto-select matching icon for known terminals
-        string? selectedTerminal = comboTerminal.SelectedItem?.ToString();
-        string? matchIcon = null;
-        if (selectedTerminal == "Windows Terminal")
-            matchIcon = "wt.ico";
-        else if (selectedTerminal == "Command Prompt")
-            matchIcon = "cmd.ico";
-        else if (selectedTerminal == "Ubuntu")
-            matchIcon = "ubuntu.ico";
-
-        if (!string.IsNullOrEmpty(matchIcon))
+        private void LoadConfig()
         {
-            for (int i = 0; i < comboIcon.Items.Count; i++)
+            string configPath = Path.Combine(_installDir, "config.json");
+            if (!File.Exists(configPath)) return;
+
+            try
             {
-                if (comboIcon.Items[i] is ComboBoxItem cbi && cbi.Display.Equals(matchIcon, StringComparison.OrdinalIgnoreCase))
+                var configJson = File.ReadAllText(configPath);
+                using var doc = JsonDocument.Parse(configJson);
+                if (doc.RootElement.TryGetProperty("command", out var commandProp))
                 {
-                    comboIcon.SelectedIndex = i;
-                    break;
+                    string savedCommand = commandProp.GetString() ?? "wt.exe";
+                    comboTerminal.SelectedItem = GetTerminalDisplayName(savedCommand);
                 }
             }
+            catch { /* Ignore config load errors */ }
         }
-    }
 
-    /// <summary>
-    /// Extracts embedded default icons to the user's icons directory if not already present.
-    /// </summary>
-    private void ExtractDefaultIcons()
-    {
-        string[] iconNames = { "wt.ico", "cmd.ico", "ubuntu.ico" };
-        string iconsDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "embold-ssh", "icons");
-        Directory.CreateDirectory(iconsDir);
-
-        foreach (var iconName in iconNames)
+        private string GetTerminalDisplayName(string commandPath)
         {
-            string outPath = Path.Combine(iconsDir, iconName);
-            if (!File.Exists(outPath))
-            {
-                // Resource name: [DefaultNamespace].[Folder].[FileName]
-                // e.g., SSHHandlerApp.DefaultIcons.wt.ico
-                string resourceName = $"SSHHandlerApp.DefaultIcons.{iconName}";
-                using (var stream = typeof(Form1).Assembly.GetManifestResourceStream(resourceName))
-                {
-                    if (stream != null)
-                    {
-                        using (var fs = new FileStream(outPath, FileMode.Create, FileAccess.Write))
-                        {
-                            stream.CopyTo(fs);
-                        }
-                    }
-                }
-            }
+            if (commandPath.EndsWith("wt.exe", StringComparison.OrdinalIgnoreCase)) return "Windows Terminal";
+            if (commandPath.EndsWith("cmd.exe", StringComparison.OrdinalIgnoreCase)) return "Command Prompt";
+            if (commandPath.EndsWith("wsl.exe", StringComparison.OrdinalIgnoreCase)) return "Ubuntu";
+            return commandPath;
         }
-    }
 
-private void ComboIcon_SelectedIndexChanged(object? sender, EventArgs e)
-    {
-        var selectedItem = comboIcon.SelectedItem as ComboBoxItem;
-        string? selectedIcon = selectedItem?.Value;
-        if (selectedIcon == "Custom...")
+        private void BtnInstall_Click(object? sender, EventArgs e)
         {
-            using (OpenFileDialog ofd = new OpenFileDialog())
+            if (!IsAdministrator())
             {
-                ofd.Filter = "Icon files (*.ico)|*.ico|All files (*.*)|*.*";
-                if (ofd.ShowDialog() == DialogResult.OK)
-                {
-                    var newItem = new ComboBoxItem { Display = Path.GetFileName(ofd.FileName), Value = ofd.FileName };
-                    bool exists = false;
-                    foreach (var item in comboIcon.Items)
-                    {
-                        if (item is ComboBoxItem cbi && cbi.Value == ofd.FileName)
-                        {
-                            exists = true;
-                            break;
-                        }
-                    }
-                    if (!exists)
-                        comboIcon.Items.Insert(comboIcon.Items.Count - 1, newItem);
-                    comboIcon.SelectedItem = newItem;
-                    selectedIcon = ofd.FileName;
-                }
-                else
-                {
-                    // Revert to previous selection if cancelled
-                    comboIcon.SelectedIndex = 0;
-                    selectedIcon = (comboIcon.Items[0] as ComboBoxItem)?.Value;
-                }
+                RelaunchAsAdmin("--install");
+                return;
             }
+            PerformInstall();
         }
-        // Display the selected icon using Icon class for better .ico support
-        if (!string.IsNullOrWhiteSpace(selectedIcon) && File.Exists(selectedIcon))
+
+        private void PerformInstall()
         {
             try
             {
-                // Dispose previous image if any
-                if (pictureIcon.Image != null)
+                // Use Process.GetCurrentProcess().MainModule.FileName to reliably get the .exe path
+                string? currentAppPath = Process.GetCurrentProcess().MainModule?.FileName;
+                if (string.IsNullOrEmpty(currentAppPath))
                 {
-                    var oldImg = pictureIcon.Image;
-                    pictureIcon.Image = null;
-                    oldImg.Dispose();
+                    MessageBox.Show("Could not determine the application path.", "Installation Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
                 }
-                using (var icon = new System.Drawing.Icon(selectedIcon, 32, 32))
+
+                // Prevent installation when running from a DLL (e.g., via 'dotnet run')
+                if (Path.GetExtension(currentAppPath).Equals(".dll", StringComparison.OrdinalIgnoreCase))
                 {
-                    pictureIcon.Image = icon.ToBitmap();
+                    MessageBox.Show(
+                        "Installation must be run from the published SSHHandlerApp.exe, not from the development environment (dotnet run).\n\nPlease build the application for release and run the .exe directly.",
+                        "Installation Error",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
+                    return;
                 }
+
+                Directory.CreateDirectory(_installDir);
+                File.Copy(currentAppPath, _installedAppPath, true);
+
+                string terminalPath = comboTerminal.SelectedItem?.ToString() switch
+                {
+                    "Windows Terminal" => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Microsoft", "WindowsApps", "wt.exe"),
+                    "Command Prompt" => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "cmd.exe"),
+                    "Ubuntu" => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "wsl.exe"),
+                    _ => comboTerminal.SelectedItem?.ToString() ?? "wt.exe"
+                };
+
+                var selectedItem = comboIcon.SelectedItem as ComboBoxItem;
+                string? iconSource = selectedItem?.Value;
+                string iconPath = Path.Combine(_installDir, "terminal.ico");
+                if (!string.IsNullOrWhiteSpace(iconSource) && File.Exists(iconSource))
+                {
+                    File.Copy(iconSource, iconPath, true);
+                }
+
+                var config = new { command = terminalPath, icon = "terminal.ico" };
+                File.WriteAllText(Path.Combine(_installDir, "config.json"), JsonSerializer.Serialize(config, new JsonSerializerOptions { WriteIndented = true }));
+
+                string regCommand = $"\"{_installedAppPath}\" \"%1\"";
+
+                using (var key = Registry.CurrentUser.CreateSubKey(@"Software\Classes\Embold.SSH"))
+                {
+                    key.SetValue("", "URL:SSH Protocol");
+                    key.SetValue("URL Protocol", "");
+                    using (var iconKey = key.CreateSubKey("DefaultIcon")) { iconKey.SetValue("", iconPath); }
+                    using (var appKey = key.CreateSubKey("Application"))
+                    {
+                        appKey.SetValue("ApplicationName", "Embold SSH Handler");
+                        appKey.SetValue("ApplicationDescription", "Open ssh:// URLs in your preferred terminal");
+                        appKey.SetValue("ApplicationCompany", "Embold");
+                        appKey.SetValue("ApplicationIcon", iconPath);
+                    }
+                    using (var capKey = key.CreateSubKey(@"Capabilities\UrlAssociations")) { capKey.SetValue("ssh", "Embold.SSH"); }
+                    using (var shellKey = key.CreateSubKey(@"shell\open\command")) { shellKey.SetValue("", regCommand); }
+                }
+
+                MessageBox.Show("SSH handler settings applied successfully for the current user.", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex)
             {
-                if (pictureIcon.Image != null)
-                {
-                    var oldImg = pictureIcon.Image;
-                    pictureIcon.Image = null;
-                    oldImg.Dispose();
-                }
-                MessageBox.Show($"Failed to load icon: {selectedIcon}\n{ex.Message}", "Icon Load Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show($"Error during install: {ex.Message}\n\nMake sure you are running as an administrator.", "Installation Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
-        else
+
+        private void BtnUninstall_Click(object? sender, EventArgs e)
         {
-            if (pictureIcon.Image != null)
+            if (!IsAdministrator())
             {
-                var oldImg = pictureIcon.Image;
-                pictureIcon.Image = null;
-                oldImg.Dispose();
+                RelaunchAsAdmin("--uninstall");
+                return;
+            }
+            PerformUninstall();
+        }
+
+        private void PerformUninstall()
+        {
+            try
+            {
+                // First, remove registry entries. This is safe to do.
+                Registry.CurrentUser.DeleteSubKeyTree(@"Software\Classes\Embold.SSH", false);
+
+                // Create a temporary batch file to delete the application files after this process exits.
+                string tempBatchFile = Path.Combine(Path.GetTempPath(), "embold-ssh-uninstall.bat");
+                string batchContent = $@"
+@echo off
+echo Waiting for SSH Handler to close...
+timeout /t 2 /nobreak > nul
+echo Deleting installation files...
+rmdir /s /q ""{_installDir}""
+echo Cleanup complete. Deleting self...
+del ""%~f0""
+";
+                File.WriteAllText(tempBatchFile, batchContent);
+
+                // Launch the batch file in a new, hidden window.
+                var startInfo = new ProcessStartInfo(tempBatchFile)
+                {
+                    CreateNoWindow = true,
+                    UseShellExecute = false,
+                    WindowStyle = ProcessWindowStyle.Hidden
+                };
+                Process.Start(startInfo);
+
+                MessageBox.Show("SSH handler uninstalled successfully. Cleanup will complete in the background.", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+                // Close the application so the batch file can delete it.
+                Application.Exit();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error during uninstall: {ex.Message}", "Uninstall Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
-    }
 
-
-
-    private void BtnInstall_Click(object sender, EventArgs e)
-    {
-        try
+        private async void CheckForUpdate()
         {
-            string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            string emboldDir = Path.Combine(localAppData, "embold-ssh");
-            Directory.CreateDirectory(emboldDir);
-
-            // Determine terminal path
-            string terminalPath = comboTerminal.SelectedItem?.ToString() switch
+            try
             {
-                "Windows Terminal" => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Microsoft", "WindowsApps", "wt.exe"),
-                "Command Prompt" => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32", "cmd.exe"),
-                "Ubuntu" => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32", "wsl.exe"),
-                _ => comboTerminal.SelectedItem?.ToString() ?? "wt.exe"
-            };
+                using var client = new HttpClient();
+                client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("EmboldSshHandler", "1.1"));
+                var response = await client.GetStringAsync("https://api.github.com/repos/emboldagency/embold-ssh/releases/latest");
 
-            // Copy icon
-            var selectedItem = comboIcon.SelectedItem as ComboBoxItem;
-            string? iconSource = selectedItem?.Value;
-            if (!string.IsNullOrWhiteSpace(iconSource) && File.Exists(iconSource))
-            {
-                File.Copy(iconSource, Path.Combine(emboldDir, "terminal.ico"), true);
-            }
+                using var doc = JsonDocument.Parse(response);
+                var tagName = doc.RootElement.GetProperty("tag_name").GetString()?.TrimStart('v');
+                var currentVersion = Assembly.GetExecutingAssembly().GetName().Version?.ToString(3);
 
-            // Save config.json
-            string configJson = "{\n  \"command\": \"" + terminalPath.Replace("\\", "\\\\") + "\",\n  \"icon\": \"terminal.ico\"\n}";
-            File.WriteAllText(Path.Combine(emboldDir, "config.json"), configJson);
-
-            // Write registry - direct to C# app instead of scripts
-            // Use MainModule.FileName for single-file publish compatibility
-            string appPath = System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName;
-            string regCommand = $"\"{appPath}\" \"%1\"";
-            string iconPath = Path.Combine(emboldDir, "terminal.ico");
-
-            using (var key = Registry.ClassesRoot.CreateSubKey("Embold.SSH"))
-            {
-                key.SetValue("", "URL:SSH Protocol");
-                key.SetValue("URL Protocol", "");
-                using (var iconKey = key.CreateSubKey("DefaultIcon"))
+                if (Version.TryParse(tagName, out var latestVersion) && Version.TryParse(currentVersion, out var appVersion))
                 {
-                    iconKey.SetValue("", iconPath);
-                }
-                using (var appKey = key.CreateSubKey("Application"))
-                {
-                    appKey.SetValue("ApplicationName", "Embold SSH Handler");
-                    appKey.SetValue("ApplicationDescription", "Open ssh:// URLs in your preferred terminal");
-                    appKey.SetValue("ApplicationCompany", "Embold");
-                    appKey.SetValue("ApplicationIcon", iconPath);
-                }
-                using (var capKey = key.CreateSubKey(@"Capabilities\UrlAssociations"))
-                {
-                    capKey.SetValue("ssh", "Embold.SSH");
-                }
-                using (var shellKey = key.CreateSubKey(@"shell\open\command"))
-                {
-                    shellKey.SetValue("", regCommand);
-                }
-            }
-            using (var regApps = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\RegisteredApplications", true))
-            {
-                if (regApps != null)
-                {
-                    regApps.SetValue("Embold SSH Handler", "Software\\Classes\\Embold.SSH\\Capabilities");
-                }
-            }
-
-            MessageBox.Show("SSH handler installed successfully.");
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show($"Error during install: {ex.Message}");
-        }
-    }
-
-        private void BtnUninstall_Click(object sender, EventArgs e)
-    {
-        try
-        {
-            // Remove registry
-            Registry.ClassesRoot.DeleteSubKeyTree("Embold.SSH", false);
-            using (var regApps = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\RegisteredApplications", true))
-            {
-                if (regApps != null)
-                {
-                    regApps.DeleteValue("Embold SSH Handler", false);
-                }
-            }
-
-            // Remove files
-            string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            string emboldDir = Path.Combine(localAppData, "embold-ssh");
-            if (Directory.Exists(emboldDir))
-            {
-                Directory.Delete(emboldDir, true);
-            }
-
-            MessageBox.Show("SSH handler uninstalled and cleaned up.");
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show($"Error during uninstall: {ex.Message}");
-        }
-    }
-
-    /// <summary>
-    /// Handle SSH URL when app is launched from protocol handler
-    /// </summary>
-    private void HandleSSHUrl(string sshUrl)
-    {
-        try
-        {
-            // Parse SSH URL (ssh://user@host:port)
-            string parsedUrl = sshUrl.Replace("ssh://", "").Replace("/", "");
-            string[] urlParts = parsedUrl.Split(':');
-            string sshHost = urlParts[0];
-            string? sshPort = urlParts.Length > 1 ? urlParts[1] : null;
-
-            // Load terminal configuration
-            string configPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "embold-ssh", "config.json");
-            string terminalCommand = "wt.exe"; // default
-            if (File.Exists(configPath))
-            {
-                try
-                {
-                    var configJson = File.ReadAllText(configPath);
-                    using (var doc = System.Text.Json.JsonDocument.Parse(configJson))
+                    if (latestVersion > appVersion)
                     {
-                        if (doc.RootElement.TryGetProperty("command", out var commandProp))
-                        {
-                            terminalCommand = commandProp.GetString() ?? "wt.exe";
-                        }
+                        linkUpdate.Text = $"Update available: v{latestVersion}";
+                        linkUpdate.LinkClicked += (s, e) => Process.Start(new ProcessStartInfo(doc.RootElement.GetProperty("html_url").GetString() ?? "") { UseShellExecute = true });
+                    }
+                    else
+                    {
+                        linkUpdate.Text = "You are up to date.";
                     }
                 }
-                catch
-                {
-                    // Use default if config parsing fails
-                }
+            }
+            catch
+            {
+                linkUpdate.Text = "Update check failed.";
+            }
+        }
+
+        public static bool IsAdministrator()
+        {
+            using var identity = WindowsIdentity.GetCurrent();
+            var principal = new WindowsPrincipal(identity);
+            return principal.IsInRole(WindowsBuiltInRole.Administrator);
+        }
+
+        private void RelaunchAsAdmin(string argument)
+        {
+            var host = Process.GetCurrentProcess().MainModule?.FileName;
+            if (host == null)
+            {
+                MessageBox.Show("Could not determine the application's host process.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
             }
 
-            // Build SSH command
-            string sshCommand = sshPort != null ? $"ssh -p {sshPort} {sshHost}" : $"ssh {sshHost}";
+            string fileName;
+            string arguments;
 
-            // Launch terminal with SSH command
-            if (terminalCommand.Contains("cmd.exe"))
+            if (Path.GetFileNameWithoutExtension(host).Equals("dotnet", StringComparison.OrdinalIgnoreCase))
             {
-                Process.Start(terminalCommand, $"/k {sshCommand}");
+                fileName = host;
+                arguments = $"run -- {argument}";
             }
             else
             {
-                Process.Start(terminalCommand, sshCommand);
+                fileName = host;
+                arguments = argument;
+            }
+
+            var startInfo = new ProcessStartInfo
+            {
+                UseShellExecute = true,
+                WorkingDirectory = Environment.CurrentDirectory,
+                FileName = fileName,
+                Verb = "runas",
+                Arguments = arguments
+            };
+
+            try
+            {
+                Process.Start(startInfo);
+                Application.Exit();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Failed to relaunch with admin privileges: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
-        catch (Exception ex)
+
+        private class ComboBoxItem { public string Display { get; set; } = string.Empty; public string Value { get; set; } = string.Empty; public override string ToString() => Display; }
+        private void ComboIcon_DrawItem(object? sender, DrawItemEventArgs e) { if (e.Index < 0) return; var cb = sender as ComboBox; var item = cb?.Items[e.Index] as ComboBoxItem; string text = item?.Display ?? cb?.Items[e.Index]?.ToString() ?? string.Empty; e.DrawBackground(); using (var brush = new SolidBrush(e.ForeColor)) { e.Graphics.DrawString(text, e.Font ?? SystemFonts.DefaultFont, brush, e.Bounds); } e.DrawFocusRectangle(); }
+        private void ComboTerminal_SelectedIndexChanged(object? sender, EventArgs e) { if (comboTerminal.SelectedItem?.ToString() == "Custom...") { using (OpenFileDialog ofd = new OpenFileDialog { Filter = "Executables (*.exe)|*.exe|All files (*.*)|*.*" }) { if (ofd.ShowDialog() == DialogResult.OK) { if (!comboTerminal.Items.Contains(ofd.FileName)) comboTerminal.Items.Insert(comboTerminal.Items.Count - 1, ofd.FileName); comboTerminal.SelectedItem = ofd.FileName; } else { comboTerminal.SelectedIndex = 0; } } } string? selectedTerminal = comboTerminal.SelectedItem?.ToString(); string? matchIcon = "embold.ico"; if (selectedTerminal == "Windows Terminal") matchIcon = "wt.ico"; else if (selectedTerminal == "Command Prompt") matchIcon = "cmd.ico"; else if (selectedTerminal == "Ubuntu") matchIcon = "ubuntu.ico"; if (!string.IsNullOrEmpty(matchIcon)) { for (int i = 0; i < comboIcon.Items.Count; i++) { if (comboIcon.Items[i] is ComboBoxItem cbi && cbi.Display.Equals(matchIcon, StringComparison.OrdinalIgnoreCase)) { comboIcon.SelectedIndex = i; break; } } } }
+        private void ExtractDefaultIcons() { string[] iconNames = { "embold.ico", "wt.ico", "cmd.ico", "ubuntu.ico" }; string iconsDir = Path.Combine(_installDir, "icons"); Directory.CreateDirectory(iconsDir); foreach (var iconName in iconNames) { string outPath = Path.Combine(iconsDir, iconName); if (!File.Exists(outPath)) { string resourceName = $"SSHHandlerApp.DefaultIcons.{iconName}"; using (var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(resourceName)) { if (stream != null) { using (var fs = new FileStream(outPath, FileMode.Create, FileAccess.Write)) { stream.CopyTo(fs); } } } } } }
+        private void ComboIcon_SelectedIndexChanged(object? sender, EventArgs e) { var selectedItem = comboIcon.SelectedItem as ComboBoxItem; string? selectedIcon = selectedItem?.Value; if (selectedIcon == "Custom...") { using (OpenFileDialog ofd = new OpenFileDialog { Filter = "Icon files (*.ico)|*.ico|All files (*.*)|*.*" }) { if (ofd.ShowDialog() == DialogResult.OK) { var newItem = new ComboBoxItem { Display = Path.GetFileName(ofd.FileName), Value = ofd.FileName }; bool exists = false; foreach (var item in comboIcon.Items) { if (item is ComboBoxItem cbi && cbi.Value == ofd.FileName) { exists = true; break; } } if (!exists) comboIcon.Items.Insert(comboIcon.Items.Count - 1, newItem); comboIcon.SelectedItem = newItem; selectedIcon = ofd.FileName; } else { if (comboIcon.Items.Count > 0) comboIcon.SelectedIndex = 0; selectedIcon = (comboIcon.Items[0] as ComboBoxItem)?.Value; } } } if (!string.IsNullOrWhiteSpace(selectedIcon) && File.Exists(selectedIcon)) { try { if (pictureIcon.Image != null) { var oldImg = pictureIcon.Image; pictureIcon.Image = null; oldImg.Dispose(); } using (var icon = new Icon(selectedIcon, 32, 32)) { pictureIcon.Image = icon.ToBitmap(); } } catch { if (pictureIcon.Image != null) { var oldImg = pictureIcon.Image; pictureIcon.Image = null; oldImg.Dispose(); } } } else { if (pictureIcon.Image != null) { var oldImg = pictureIcon.Image; pictureIcon.Image = null; oldImg.Dispose(); } } }
+    }
+
+    public static class UrlHandler
+    {
+        public static void HandleSshUrl(string sshUrl)
         {
-            // Log error or show message
-            MessageBox.Show($"Error handling SSH URL: {ex.Message}", "SSH Handler Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-        }
-        finally
-        {
-            // Close the app after handling URL
-            Application.Exit();
+            try
+            {
+                string parsedUrl = sshUrl.Trim().Replace("ssh://", "").TrimEnd('/');
+                string[] urlParts = parsedUrl.Split(':');
+                string sshHost = urlParts[0];
+                string? sshPort = urlParts.Length > 1 ? urlParts[1] : null;
+
+                string configPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "embold-ssh", "config.json");
+                string terminalCommand = "wt.exe";
+                if (File.Exists(configPath))
+                {
+                    var configJson = File.ReadAllText(configPath);
+                    using var doc = JsonDocument.Parse(configJson);
+                    if (doc.RootElement.TryGetProperty("command", out var commandProp))
+                    {
+                        terminalCommand = commandProp.GetString() ?? "wt.exe";
+                    }
+                }
+
+                string sshCommand = sshPort != null ? $"ssh -p {sshPort} {sshHost}" : $"ssh {sshHost}";
+
+                var startInfo = new ProcessStartInfo(terminalCommand)
+                {
+                    UseShellExecute = true,
+                    Arguments = terminalCommand.Contains("cmd.exe") ? $"/k {sshCommand}" : sshCommand
+                };
+                Process.Start(startInfo);
+            }
+            catch (Exception ex)
+            {
+                string logDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "embold-ssh");
+                Directory.CreateDirectory(logDir);
+                File.AppendAllText(Path.Combine(logDir, "error.log"), $"{DateTime.Now}: {ex.Message}\n");
+            }
         }
     }
-}
 }
