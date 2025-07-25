@@ -1,4 +1,4 @@
-# emBold SSH Handler
+# emBold SSH Handler for Windows
 
 **emBold SSH Handler** lets you open `ssh://` links in your favorite terminal (Windows Terminal, Command Prompt, Ubuntu, or custom) on Windows.
 
