@@ -29,21 +29,43 @@ namespace SSHHandlerApp
 
         public Form1(string[] args)
         {
-            InitializeComponent();
+            try
+            {
+                InitializeComponent();
 
-            // Set up event handlers
-            btnInstall.Click += BtnApply_Click;
-            btnUninstall.Click += BtnRemoveHandler_Click;
-            comboTerminal.SelectedIndexChanged += ComboTerminal_SelectedIndexChanged;
+                // Set the form icon from embedded resource
+                try
+                {
+                    using var iconStream = Assembly.GetExecutingAssembly().GetManifestResourceStream("SSHHandlerApp.DefaultIcons.embold.ico");
+                    if (iconStream != null)
+                    {
+                        this.Icon = new Icon(iconStream);
+                    }
+                }
+                catch
+                {
+                    // If icon loading fails, continue without icon
+                }
 
-            // Initialize config directory
-            Directory.CreateDirectory(_configDir);
+                // Set up event handlers
+                btnInstall.Click += BtnApply_Click;
+                btnUninstall.Click += BtnRemoveHandler_Click;
+                comboTerminal.SelectedIndexChanged += ComboTerminal_SelectedIndexChanged;
 
-            LoadConfig();
-            CheckForUpdate();
+                // Initialize config directory
+                Directory.CreateDirectory(_configDir);
 
-            // Set initial profile visibility after loading config
-            ComboTerminal_SelectedIndexChanged(this, EventArgs.Empty);
+                LoadConfig();
+                CheckForUpdate();
+
+                // Set initial profile visibility after loading config
+                ComboTerminal_SelectedIndexChanged(this, EventArgs.Empty);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Form Initialization Error: {ex.Message}\n\nStack Trace:\n{ex.StackTrace}", "Form Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                throw; // Re-throw to prevent partial initialization
+            }
         }
 
         private void LoadConfig()
