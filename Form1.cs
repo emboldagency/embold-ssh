@@ -1,5 +1,7 @@
 using Microsoft.Win32;
 using System;
+using System.Collections.Generic;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
@@ -7,7 +9,6 @@ using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Reflection;
-using System.Security.Principal;
 using System.Text.Json;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -18,64 +19,36 @@ namespace SSHHandlerApp
     {
         // These controls are initialized in Form1.Designer.cs
         private ComboBox comboTerminal = null!;
-        private ComboBox comboIcon = null!;
+        private ComboBox comboWtProfile = null!;
+        private Label labelWtProfile = null!;
         private Button btnInstall = null!;
         private Button btnUninstall = null!;
-        private PictureBox pictureIcon = null!;
         private LinkLabel linkUpdate = null!;
 
-        private readonly string _installDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "embold-ssh");
-        private readonly string _installedAppPath;
+        private readonly string _configDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "embold-ssh");
 
         public Form1(string[] args)
         {
-            _installedAppPath = Path.Combine(_installDir, "SSHHandlerApp.exe");
-
             InitializeComponent();
 
             // Set up event handlers
-            btnInstall.Click += BtnInstall_Click;
-            btnUninstall.Click += BtnUninstall_Click;
+            btnInstall.Click += BtnApply_Click;
+            btnUninstall.Click += BtnRemoveHandler_Click;
             comboTerminal.SelectedIndexChanged += ComboTerminal_SelectedIndexChanged;
-            comboIcon.SelectedIndexChanged += ComboIcon_SelectedIndexChanged;
-            comboIcon.DrawItem += ComboIcon_DrawItem;
 
-            // Initialize Icons and UI state
-            ExtractDefaultIcons();
-            string iconsDir = Path.Combine(_installDir, "icons");
-            if (Directory.Exists(iconsDir))
-            {
-                foreach (var iconFile in Directory.GetFiles(iconsDir, "*.ico"))
-                {
-                    comboIcon.Items.Add(new ComboBoxItem { Display = Path.GetFileName(iconFile), Value = iconFile });
-                }
-            }
-            comboIcon.Items.Add(new ComboBoxItem { Display = "Custom...", Value = "Custom..." });
-
-            // Set initial icon based on the default terminal
-            ComboTerminal_SelectedIndexChanged(this, EventArgs.Empty);
+            // Initialize config directory
+            Directory.CreateDirectory(_configDir);
 
             LoadConfig();
             CheckForUpdate();
 
-            // Handle command-line arguments for post-elevation tasks
-            if (args.Length > 0)
-            {
-                if (args.Any(a => a.Equals("--install", StringComparison.OrdinalIgnoreCase)))
-                {
-                    PerformInstall();
-                    Application.Exit();
-                }
-                else if (args.Any(a => a.Equals("--uninstall", StringComparison.OrdinalIgnoreCase)))
-                {
-                    PerformUninstall();
-                }
-            }
+            // Set initial profile visibility after loading config
+            ComboTerminal_SelectedIndexChanged(this, EventArgs.Empty);
         }
 
         private void LoadConfig()
         {
-            string configPath = Path.Combine(_installDir, "config.json");
+            string configPath = Path.Combine(_configDir, "config.json");
             if (!File.Exists(configPath)) return;
 
             try
@@ -86,6 +59,14 @@ namespace SSHHandlerApp
                 {
                     string savedCommand = commandProp.GetString() ?? "wt.exe";
                     comboTerminal.SelectedItem = GetTerminalDisplayName(savedCommand);
+                }
+                // Load the saved profile if it exists
+                if (doc.RootElement.TryGetProperty("wtProfile", out var profileProp))
+                {
+                    string savedProfile = profileProp.GetString() ?? "";
+                    // The SelectedIndexChanged handler will populate the profiles, then we can select the saved one.
+                    PopulateWtProfiles();
+                    comboWtProfile.SelectedItem = savedProfile;
                 }
             }
             catch { /* Ignore config load errors */ }
@@ -99,42 +80,24 @@ namespace SSHHandlerApp
             return commandPath;
         }
 
-        private void BtnInstall_Click(object? sender, EventArgs e)
+        private void BtnApply_Click(object? sender, EventArgs e)
         {
-            if (!IsAdministrator())
-            {
-                RelaunchAsAdmin("--install");
-                return;
-            }
-            PerformInstall();
+            // Apply settings - register protocol handler with current app location
+            ApplySettings();
         }
 
-        private void PerformInstall()
+        private void ApplySettings()
         {
             try
             {
-                // Use Process.GetCurrentProcess().MainModule.FileName to reliably get the .exe path
                 string? currentAppPath = Process.GetCurrentProcess().MainModule?.FileName;
                 if (string.IsNullOrEmpty(currentAppPath))
                 {
-                    MessageBox.Show("Could not determine the application path.", "Installation Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    MessageBox.Show("Could not determine the application path.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     return;
                 }
 
-                // Prevent installation when running from a DLL (e.g., via 'dotnet run')
-                if (Path.GetExtension(currentAppPath).Equals(".dll", StringComparison.OrdinalIgnoreCase))
-                {
-                    MessageBox.Show(
-                        "Installation must be run from the published SSHHandlerApp.exe, not from the development environment (dotnet run).\n\nPlease build the application for release and run the .exe directly.",
-                        "Installation Error",
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Error);
-                    return;
-                }
-
-                Directory.CreateDirectory(_installDir);
-                File.Copy(currentAppPath, _installedAppPath, true);
-
+                // Apply settings without copying files
                 string terminalPath = comboTerminal.SelectedItem?.ToString() switch
                 {
                     "Windows Terminal" => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Microsoft", "WindowsApps", "wt.exe"),
@@ -143,90 +106,127 @@ namespace SSHHandlerApp
                     _ => comboTerminal.SelectedItem?.ToString() ?? "wt.exe"
                 };
 
-                var selectedItem = comboIcon.SelectedItem as ComboBoxItem;
-                string? iconSource = selectedItem?.Value;
-                string iconPath = Path.Combine(_installDir, "terminal.ico");
-                if (!string.IsNullOrWhiteSpace(iconSource) && File.Exists(iconSource))
+                // Use the app's embedded icon for protocol handler (Windows will extract it automatically)
+                string protocolIconPath = $"{currentAppPath},0";
+
+                // Update config file
+                var config = new
                 {
-                    File.Copy(iconSource, iconPath, true);
-                }
+                    command = terminalPath,
+                    wtProfile = comboTerminal.SelectedItem?.ToString() == "Windows Terminal" ? comboWtProfile.SelectedItem?.ToString() : null
+                };
+                File.WriteAllText(Path.Combine(_configDir, "config.json"), JsonSerializer.Serialize(config, new JsonSerializerOptions { WriteIndented = true }));
 
-                var config = new { command = terminalPath, icon = "terminal.ico" };
-                File.WriteAllText(Path.Combine(_installDir, "config.json"), JsonSerializer.Serialize(config, new JsonSerializerOptions { WriteIndented = true }));
-
-                string regCommand = $"\"{_installedAppPath}\" \"%1\"";
-
+                // Update registry entries for protocol handler - use current app path
+                // Use HKEY_CURRENT_USER to avoid requiring admin privileges
+                string regCommand = $"\"{currentAppPath}\" \"%1\"";
                 using (var key = Registry.CurrentUser.CreateSubKey(@"Software\Classes\Embold.SSH"))
                 {
                     key.SetValue("", "URL:SSH Protocol");
                     key.SetValue("URL Protocol", "");
-                    using (var iconKey = key.CreateSubKey("DefaultIcon")) { iconKey.SetValue("", iconPath); }
-                    using (var appKey = key.CreateSubKey("Application"))
-                    {
-                        appKey.SetValue("ApplicationName", "Embold SSH Handler");
-                        appKey.SetValue("ApplicationDescription", "Open ssh:// URLs in your preferred terminal");
-                        appKey.SetValue("ApplicationCompany", "Embold");
-                        appKey.SetValue("ApplicationIcon", iconPath);
-                    }
-                    using (var capKey = key.CreateSubKey(@"Capabilities\UrlAssociations")) { capKey.SetValue("ssh", "Embold.SSH"); }
+                    using (var iconKey = key.CreateSubKey("DefaultIcon")) { iconKey.SetValue("", protocolIconPath); }
                     using (var shellKey = key.CreateSubKey(@"shell\open\command")) { shellKey.SetValue("", regCommand); }
                 }
 
-                MessageBox.Show("SSH handler settings applied successfully for the current user.", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show("SSH handler settings applied successfully.\n\nThe protocol handler now points to this application at its current location.", "Settings Applied", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Error during install: {ex.Message}\n\nMake sure you are running as an administrator.", "Installation Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show($"Error applying settings: {ex.Message}", "Settings Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
-        private void BtnUninstall_Click(object? sender, EventArgs e)
+        private void BtnRemoveHandler_Click(object? sender, EventArgs e)
         {
-            if (!IsAdministrator())
-            {
-                RelaunchAsAdmin("--uninstall");
-                return;
-            }
-            PerformUninstall();
+            // Remove protocol handler registration
+            PerformRegistryCleanup();
         }
 
-        private void PerformUninstall()
+        private void PerformRegistryCleanup()
         {
             try
             {
-                // First, remove registry entries. This is safe to do.
-                Registry.CurrentUser.DeleteSubKeyTree(@"Software\Classes\Embold.SSH", false);
+                bool removedAny = false;
 
-                // Create a temporary batch file to delete the application files after this process exits.
-                string tempBatchFile = Path.Combine(Path.GetTempPath(), "embold-ssh-uninstall.bat");
-                string batchContent = $@"
-@echo off
-echo Waiting for SSH Handler to close...
-timeout /t 2 /nobreak > nul
-echo Deleting installation files...
-rmdir /s /q ""{_installDir}""
-echo Cleanup complete. Deleting self...
-del ""%~f0""
-";
-                File.WriteAllText(tempBatchFile, batchContent);
-
-                // Launch the batch file in a new, hidden window.
-                var startInfo = new ProcessStartInfo(tempBatchFile)
+                // Try to remove from HKEY_CURRENT_USER first
+                try
                 {
-                    CreateNoWindow = true,
-                    UseShellExecute = false,
-                    WindowStyle = ProcessWindowStyle.Hidden
-                };
-                Process.Start(startInfo);
+                    Registry.CurrentUser.DeleteSubKeyTree(@"Software\Classes\Embold.SSH", false);
+                    removedAny = true;
+                }
+                catch { /* Key doesn't exist in HKCU, continue */ }
 
-                MessageBox.Show("SSH handler uninstalled successfully. Cleanup will complete in the background.", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                // Try to remove from HKEY_LOCAL_MACHINE (may require admin)
+                try
+                {
+                    Registry.LocalMachine.DeleteSubKeyTree(@"Software\Classes\Embold.SSH", false);
+                    removedAny = true;
+                }
+                catch { /* Key doesn't exist in HKLM or no permission, continue */ }
 
-                // Close the application so the batch file can delete it.
-                Application.Exit();
+                if (removedAny)
+                {
+                    // Ask if user wants to also remove config files
+                    var result = MessageBox.Show("SSH protocol handler removed successfully.\n\nDo you also want to remove the configuration files from %LocalAppData%\\embold-ssh?\n\n(Note: The app will close after cleanup to release file locks.)",
+                        "Handler Removed", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+
+                    if (result == DialogResult.Yes)
+                    {
+                        // Create a PowerShell script to clean up after the app exits
+                        var cleanupScript = Path.GetTempFileName() + ".ps1";
+                        var scriptContent = $@"
+# Wait for the SSH Handler app to fully exit
+Start-Sleep -Seconds 3
+
+# Remove the config directory
+try {{
+    if (Test-Path '{_configDir}') {{
+        Remove-Item '{_configDir}' -Recurse -Force
+        Write-Host 'Configuration files removed successfully.'
+    }}
+}} catch {{
+    Write-Host 'Could not remove configuration files. You may need to delete them manually from: {_configDir}'
+}}
+
+# Clean up this script
+Remove-Item '{cleanupScript}' -Force -ErrorAction SilentlyContinue
+";
+
+                        try
+                        {
+                            File.WriteAllText(cleanupScript, scriptContent);
+
+                            // Start PowerShell to run the cleanup script in the background
+                            var startInfo = new ProcessStartInfo
+                            {
+                                FileName = "powershell.exe",
+                                Arguments = $"-WindowStyle Hidden -ExecutionPolicy Bypass -File \"{cleanupScript}\"",
+                                UseShellExecute = true,
+                                CreateNoWindow = true
+                            };
+                            Process.Start(startInfo);
+
+                            MessageBox.Show("SSH protocol handler removed. The application will now close and clean up configuration files.",
+                                "Cleanup Scheduled", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        }
+                        catch (Exception ex)
+                        {
+                            MessageBox.Show($"SSH protocol handler removed, but could not schedule config cleanup: {ex.Message}\n\nYou can manually delete: {_configDir}",
+                                "Cleanup Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        }
+
+                        Application.Exit();
+                    }
+                }
+                else
+                {
+                    MessageBox.Show("No SSH protocol handler found to remove.",
+                        "Handler Not Found", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Error during uninstall: {ex.Message}", "Uninstall Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show($"Error removing handler: {ex.Message}", "Removal Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
@@ -242,12 +242,14 @@ del ""%~f0""
                 var tagName = doc.RootElement.GetProperty("tag_name").GetString()?.TrimStart('v');
                 var currentVersion = Assembly.GetExecutingAssembly().GetName().Version?.ToString(3);
 
+                // Always link to releases page, regardless of version status
+                linkUpdate.LinkClicked += (s, e) => Process.Start(new ProcessStartInfo("https://github.com/emboldagency/embold-ssh/releases") { UseShellExecute = true });
+
                 if (Version.TryParse(tagName, out var latestVersion) && Version.TryParse(currentVersion, out var appVersion))
                 {
                     if (latestVersion > appVersion)
                     {
                         linkUpdate.Text = $"Update available: v{latestVersion}";
-                        linkUpdate.LinkClicked += (s, e) => Process.Start(new ProcessStartInfo(doc.RootElement.GetProperty("html_url").GetString() ?? "") { UseShellExecute = true });
                     }
                     else
                     {
@@ -261,61 +263,72 @@ del ""%~f0""
             }
         }
 
-        public static bool IsAdministrator()
+        private void PopulateWtProfiles()
         {
-            using var identity = WindowsIdentity.GetCurrent();
-            var principal = new WindowsPrincipal(identity);
-            return principal.IsInRole(WindowsBuiltInRole.Administrator);
+            comboWtProfile.Items.Clear();
+            var profiles = GetWtProfiles();
+            if (profiles.Any())
+            {
+                comboWtProfile.Items.AddRange(profiles.ToArray());
+                comboWtProfile.SelectedIndex = 0;
+            }
         }
 
-        private void RelaunchAsAdmin(string argument)
+        private List<string> GetWtProfiles()
         {
-            var host = Process.GetCurrentProcess().MainModule?.FileName;
-            if (host == null)
-            {
-                MessageBox.Show("Could not determine the application's host process.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return;
-            }
+            var profiles = new List<string>();
+            string settingsPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Packages", "Microsoft.WindowsTerminal_8wekyb3d8bbwe", "LocalState", "settings.json");
 
-            string fileName;
-            string arguments;
-
-            if (Path.GetFileNameWithoutExtension(host).Equals("dotnet", StringComparison.OrdinalIgnoreCase))
-            {
-                fileName = host;
-                arguments = $"run -- {argument}";
-            }
-            else
-            {
-                fileName = host;
-                arguments = argument;
-            }
-
-            var startInfo = new ProcessStartInfo
-            {
-                UseShellExecute = true,
-                WorkingDirectory = Environment.CurrentDirectory,
-                FileName = fileName,
-                Verb = "runas",
-                Arguments = arguments
-            };
+            if (!File.Exists(settingsPath)) return profiles;
 
             try
             {
-                Process.Start(startInfo);
-                Application.Exit();
+                var json = File.ReadAllText(settingsPath);
+                using var doc = JsonDocument.Parse(json);
+                if (doc.RootElement.TryGetProperty("profiles", out var profilesElement) && profilesElement.TryGetProperty("list", out var listElement))
+                {
+                    foreach (var profile in listElement.EnumerateArray())
+                    {
+                        if (profile.TryGetProperty("name", out var nameElement))
+                        {
+                            profiles.Add(nameElement.GetString() ?? "");
+                        }
+                    }
+                }
             }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Failed to relaunch with admin privileges: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
+            catch { /* Ignore parsing errors */ }
+            return profiles;
         }
 
-        private class ComboBoxItem { public string Display { get; set; } = string.Empty; public string Value { get; set; } = string.Empty; public override string ToString() => Display; }
-        private void ComboIcon_DrawItem(object? sender, DrawItemEventArgs e) { if (e.Index < 0) return; var cb = sender as ComboBox; var item = cb?.Items[e.Index] as ComboBoxItem; string text = item?.Display ?? cb?.Items[e.Index]?.ToString() ?? string.Empty; e.DrawBackground(); using (var brush = new SolidBrush(e.ForeColor)) { e.Graphics.DrawString(text, e.Font ?? SystemFonts.DefaultFont, brush, e.Bounds); } e.DrawFocusRectangle(); }
-        private void ComboTerminal_SelectedIndexChanged(object? sender, EventArgs e) { if (comboTerminal.SelectedItem?.ToString() == "Custom...") { using (OpenFileDialog ofd = new OpenFileDialog { Filter = "Executables (*.exe)|*.exe|All files (*.*)|*.*" }) { if (ofd.ShowDialog() == DialogResult.OK) { if (!comboTerminal.Items.Contains(ofd.FileName)) comboTerminal.Items.Insert(comboTerminal.Items.Count - 1, ofd.FileName); comboTerminal.SelectedItem = ofd.FileName; } else { comboTerminal.SelectedIndex = 0; } } } string? selectedTerminal = comboTerminal.SelectedItem?.ToString(); string? matchIcon = "embold.ico"; if (selectedTerminal == "Windows Terminal") matchIcon = "wt.ico"; else if (selectedTerminal == "Command Prompt") matchIcon = "cmd.ico"; else if (selectedTerminal == "Ubuntu") matchIcon = "ubuntu.ico"; if (!string.IsNullOrEmpty(matchIcon)) { for (int i = 0; i < comboIcon.Items.Count; i++) { if (comboIcon.Items[i] is ComboBoxItem cbi && cbi.Display.Equals(matchIcon, StringComparison.OrdinalIgnoreCase)) { comboIcon.SelectedIndex = i; break; } } } }
-        private void ExtractDefaultIcons() { string[] iconNames = { "embold.ico", "wt.ico", "cmd.ico", "ubuntu.ico" }; string iconsDir = Path.Combine(_installDir, "icons"); Directory.CreateDirectory(iconsDir); foreach (var iconName in iconNames) { string outPath = Path.Combine(iconsDir, iconName); if (!File.Exists(outPath)) { string resourceName = $"SSHHandlerApp.DefaultIcons.{iconName}"; using (var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(resourceName)) { if (stream != null) { using (var fs = new FileStream(outPath, FileMode.Create, FileAccess.Write)) { stream.CopyTo(fs); } } } } } }
-        private void ComboIcon_SelectedIndexChanged(object? sender, EventArgs e) { var selectedItem = comboIcon.SelectedItem as ComboBoxItem; string? selectedIcon = selectedItem?.Value; if (selectedIcon == "Custom...") { using (OpenFileDialog ofd = new OpenFileDialog { Filter = "Icon files (*.ico)|*.ico|All files (*.*)|*.*" }) { if (ofd.ShowDialog() == DialogResult.OK) { var newItem = new ComboBoxItem { Display = Path.GetFileName(ofd.FileName), Value = ofd.FileName }; bool exists = false; foreach (var item in comboIcon.Items) { if (item is ComboBoxItem cbi && cbi.Value == ofd.FileName) { exists = true; break; } } if (!exists) comboIcon.Items.Insert(comboIcon.Items.Count - 1, newItem); comboIcon.SelectedItem = newItem; selectedIcon = ofd.FileName; } else { if (comboIcon.Items.Count > 0) comboIcon.SelectedIndex = 0; selectedIcon = (comboIcon.Items[0] as ComboBoxItem)?.Value; } } } if (!string.IsNullOrWhiteSpace(selectedIcon) && File.Exists(selectedIcon)) { try { if (pictureIcon.Image != null) { var oldImg = pictureIcon.Image; pictureIcon.Image = null; oldImg.Dispose(); } using (var icon = new Icon(selectedIcon, 32, 32)) { pictureIcon.Image = icon.ToBitmap(); } } catch { if (pictureIcon.Image != null) { var oldImg = pictureIcon.Image; pictureIcon.Image = null; oldImg.Dispose(); } } } else { if (pictureIcon.Image != null) { var oldImg = pictureIcon.Image; pictureIcon.Image = null; oldImg.Dispose(); } } }
+        private void ComboTerminal_SelectedIndexChanged(object? sender, EventArgs e)
+        {
+            bool isWtSelected = comboTerminal.SelectedItem?.ToString() == "Windows Terminal";
+            labelWtProfile.Visible = isWtSelected;
+            comboWtProfile.Visible = isWtSelected;
+
+            if (isWtSelected)
+            {
+                PopulateWtProfiles();
+            }
+
+            if (comboTerminal.SelectedItem?.ToString() == "Custom...")
+            {
+                using (OpenFileDialog ofd = new OpenFileDialog { Filter = "Executables (*.exe)|*.exe|All files (*.*)|*.*" })
+                {
+                    if (ofd.ShowDialog() == DialogResult.OK)
+                    {
+                        if (!comboTerminal.Items.Contains(ofd.FileName))
+                            comboTerminal.Items.Insert(comboTerminal.Items.Count - 1, ofd.FileName);
+                        comboTerminal.SelectedItem = ofd.FileName;
+                    }
+                    else
+                    {
+                        comboTerminal.SelectedIndex = 0;
+                    }
+                }
+            }
+        }
     }
 
     public static class UrlHandler
@@ -331,6 +344,8 @@ del ""%~f0""
 
                 string configPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "embold-ssh", "config.json");
                 string terminalCommand = "wt.exe";
+                string? wtProfile = null;
+
                 if (File.Exists(configPath))
                 {
                     var configJson = File.ReadAllText(configPath);
@@ -339,14 +354,32 @@ del ""%~f0""
                     {
                         terminalCommand = commandProp.GetString() ?? "wt.exe";
                     }
+                    if (doc.RootElement.TryGetProperty("wtProfile", out var profileProp))
+                    {
+                        wtProfile = profileProp.GetString();
+                    }
                 }
 
                 string sshCommand = sshPort != null ? $"ssh -p {sshPort} {sshHost}" : $"ssh {sshHost}";
+                string arguments;
+
+                if (terminalCommand.Contains("wt.exe") && !string.IsNullOrEmpty(wtProfile))
+                {
+                    arguments = $"-p \"{wtProfile}\" {sshCommand}";
+                }
+                else if (terminalCommand.Contains("cmd.exe"))
+                {
+                    arguments = $"/k {sshCommand}";
+                }
+                else
+                {
+                    arguments = sshCommand;
+                }
 
                 var startInfo = new ProcessStartInfo(terminalCommand)
                 {
                     UseShellExecute = true,
-                    Arguments = terminalCommand.Contains("cmd.exe") ? $"/k {sshCommand}" : sshCommand
+                    Arguments = arguments
                 };
                 Process.Start(startInfo);
             }

@@ -25,19 +25,16 @@ jobs:
       run: dotnet build SSHHandlerApp.csproj --configuration Release --no-restore
 
     - name: Clean publish directory
-      run: if (Test-Path publish) { Remove-Item publish -Recurse -Force }
+      run: if (Test-Path bin/Release/net8.0-windows/win-x64/publish) { Remove-Item bin/Release/net8.0-windows/win-x64/publish -Recurse -Force }
 
     - name: Publish
-      run: dotnet publish SSHHandlerApp.csproj -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true -o publish
-
-    - name: Zip published app
-      run: Compress-Archive -Path publish\* -DestinationPath embold-ssh-win-x64.zip
+      run: dotnet publish SSHHandlerApp.csproj -c Release -r win-x64 --self-contained=true /p:PublishSingleFile=true --output bin/Release/net8.0-windows/win-x64/publish
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
-        name: embold-ssh-win-x64
-        path: embold-ssh-win-x64.zip
+        name: SSHHandlerApp.exe
+        path: bin/Release/net8.0-windows/win-x64/publish/SSHHandlerApp.exe
 
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
@@ -45,12 +42,22 @@ jobs:
         tag_name: ${{ github.ref_name }}
         name: "emBold SSH Handler ${{ github.ref_name }}"
         body: |
-          Windows SSH protocol handler for easy ssh:// link integration.
-          - User-friendly terminal and icon selection
-          - Clean install/uninstall (removes registry entries)
-          - No PowerShell/VBS scripts; all logic in C#
-          - Defender-friendly, self-contained .NET 8 WinForms app
-          - See README for usage and installation instructions
-        files: embold-ssh-win-x64.zip
+          Portable Windows SSH protocol handler for easy ssh:// link integration.
+          
+          **Features:**
+          - Self-contained & portable - no installation required
+          - Multiple terminal support (Windows Terminal, Command Prompt, PowerShell, Ubuntu/WSL, Git Bash)
+          - Simple setup - just two buttons: Apply and Remove Handler
+          - No .NET required - everything bundled in a single executable
+          - Clean removal - removes all registry entries and config files
+          
+          **Usage:**
+          1. Download SSHHandlerApp.exe
+          2. Run from anywhere (no installation needed)
+          3. Select your preferred terminal and click "Apply"
+          4. Click ssh:// links to open in your chosen terminal
+          
+          See README for detailed usage instructions.
+        files: bin/Release/net8.0-windows/win-x64/publish/SSHHandlerApp.exe
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

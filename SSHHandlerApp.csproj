@@ -14,9 +14,6 @@
 
   <ItemGroup>
     <EmbeddedResource Include="DefaultIcons\embold.ico" />
-    <EmbeddedResource Include="DefaultIcons\wt.ico" />
-    <EmbeddedResource Include="DefaultIcons\cmd.ico" />
-    <EmbeddedResource Include="DefaultIcons\ubuntu.ico" />
   </ItemGroup>
 
 </Project>

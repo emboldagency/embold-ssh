@@ -32,7 +32,7 @@
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
 
             // Form-level styling
-            this.ClientSize = new System.Drawing.Size(480, 220);
+            this.ClientSize = new System.Drawing.Size(480, 200); // Reduced height since no icon selection
             this.Text = "emBold SSH Protocol Handler";
             this.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point);
             this.BackColor = System.Drawing.Color.White; // Consistent white background
@@ -41,9 +41,9 @@
 
             // Labels
             var labelTerminal = new System.Windows.Forms.Label { Text = "Terminal:", Location = new System.Drawing.Point(30, 38), AutoSize = true };
-            var labelIcon = new System.Windows.Forms.Label { Text = "Icon:", Location = new System.Drawing.Point(30, 78), AutoSize = true };
+            this.labelWtProfile = new System.Windows.Forms.Label { Text = "WT Profile:", Location = new System.Drawing.Point(30, 78), AutoSize = true, Visible = false };
             this.Controls.Add(labelTerminal);
-            this.Controls.Add(labelIcon);
+            this.Controls.Add(this.labelWtProfile);
 
             // Terminal ComboBox
             this.comboTerminal = new System.Windows.Forms.ComboBox { Location = new System.Drawing.Point(130, 35), Size = new System.Drawing.Size(280, 23), DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList };
@@ -51,18 +51,14 @@
             this.comboTerminal.SelectedItem = "Windows Terminal";
             this.Controls.Add(this.comboTerminal);
 
-            // Icon ComboBox
-            this.comboIcon = new System.Windows.Forms.ComboBox { Location = new System.Drawing.Point(130, 75), Size = new System.Drawing.Size(210, 23), DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList, DrawMode = System.Windows.Forms.DrawMode.OwnerDrawFixed };
-            this.Controls.Add(this.comboIcon);
-
-            // Icon PictureBox
-            this.pictureIcon = new System.Windows.Forms.PictureBox { Location = new System.Drawing.Point(350, 75), Size = new System.Drawing.Size(32, 32), SizeMode = System.Windows.Forms.PictureBoxSizeMode.Zoom };
-            this.Controls.Add(this.pictureIcon);
+            // Windows Terminal Profile ComboBox
+            this.comboWtProfile = new System.Windows.Forms.ComboBox { Location = new System.Drawing.Point(130, 75), Size = new System.Drawing.Size(280, 23), DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList, Visible = false };
+            this.Controls.Add(this.comboWtProfile);
 
             // Apply Button (Primary Action)
             this.btnInstall = new System.Windows.Forms.Button();
             this.btnInstall.Text = "Apply";
-            this.btnInstall.Location = new System.Drawing.Point(130, 125);
+            this.btnInstall.Location = new System.Drawing.Point(130, 125); // Moved up since no icon controls
             this.btnInstall.Size = new System.Drawing.Size(120, 35);
             this.btnInstall.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.btnInstall.FlatAppearance.BorderSize = 0;
@@ -73,8 +69,8 @@
 
             // Uninstall Button (Secondary Action)
             this.btnUninstall = new System.Windows.Forms.Button();
-            this.btnUninstall.Text = "Uninstall";
-            this.btnUninstall.Location = new System.Drawing.Point(260, 125);
+            this.btnUninstall.Text = "Clear";
+            this.btnUninstall.Location = new System.Drawing.Point(260, 125); // Moved up since no icon controls
             this.btnUninstall.Size = new System.Drawing.Size(120, 35);
             this.btnUninstall.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.btnUninstall.FlatAppearance.BorderSize = 1;
