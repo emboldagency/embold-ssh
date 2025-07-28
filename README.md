@@ -7,7 +7,7 @@
 - **Multiple Terminal Support**: Works with Windows Terminal, Command Prompt, PowerShell, Ubuntu/WSL, Git Bash, and custom terminals
 - **Self-Contained & Portable**: No installation required - run from anywhere
 - **No .NET Required**: Everything is bundled in a single executable
-- **Simple Setup**: Just two buttons - Apply and Remove Handler
+- **Simple Setup**: Just two buttons - Apply and Clear
 
 ## **Download & Usage**
 
@@ -21,7 +21,7 @@
 
 - **Portable**: The app can be run from any location - no installation required
 - **Apply Button**: Registers the SSH protocol handler pointing to the current app location
-- **Remove Handler Button**: Removes the SSH protocol handler and optionally cleans up config files
+- **Clear Button**: Removes the SSH protocol handler and optionally cleans up config files
 - **Config Storage**: Settings are saved to `%LocalAppData%\embold-ssh\config.json`
 - **Move Anywhere**: If you move the app, just click "Apply" again to update the registry
 
@@ -37,7 +37,7 @@ Because this app registers a custom protocol handler, Windows Defender or other 
 To remove the SSH protocol handler:
 
 1. **Run** `SSHHandlerApp.exe`
-2. **Click "Remove Handler"**
+2. **Click "Clear"**
    - This removes the SSH protocol handler from Windows Registry
    - Optionally removes configuration files from `%LocalAppData%\embold-ssh`
 3. **Delete** `SSHHandlerApp.exe` when you no longer need it
@@ -46,9 +46,13 @@ To remove the SSH protocol handler:
 
 If you need to manually remove the protocol handler:
 
-1. Remove registry entries by running this command in PowerShell:
+1. Remove registry entries by running these commands in PowerShell:
    ```powershell
+   # Remove from user registry (HKCU)
    Remove-Item "HKCU:\Software\Classes\Embold.SSH" -Recurse -Force -ErrorAction SilentlyContinue
+   
+   # Remove from machine registry (HKLM) - may require admin privileges
+   Remove-Item "HKLM:\Software\Classes\Embold.SSH" -Recurse -Force -ErrorAction SilentlyContinue
    ```
 2. Optionally delete the config folder: `%LocalAppData%\embold-ssh`
 
@@ -100,5 +104,5 @@ Always test the published version from the `publish` folder. The app behavior:
 
 1. **Portable**: Can be run from any location without installation
 2. **Apply**: Registers SSH protocol handler pointing to current app location  
-3. **Remove Handler**: Removes protocol handler and optionally cleans config files
+3. **Clear**: Removes protocol handler and optionally cleans config files
 4. **Move & Re-Apply**: If you move the app, just click "Apply" again to update the registry
